@@ -52,13 +52,22 @@ class PrinterBridge(private val activity: Activity, private val web: WebView) {
     @JavascriptInterface
     fun hasPermission(): Boolean =
         Build.VERSION.SDK_INT < 31 ||
-            activity.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+            (activity.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
+             activity.checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED)
 
     @JavascriptInterface
     fun requestPermission() {
         if (Build.VERSION.SDK_INT >= 31) {
             activity.runOnUiThread {
-                activity.requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), 7)
+                // CONNECT dibutuhkan untuk perangkat yang sudah dipasangkan;
+                // SCAN dibutuhkan oleh cancelDiscovery() pada Android 12+.
+                activity.requestPermissions(
+                    arrayOf(
+                        Manifest.permission.BLUETOOTH_CONNECT,
+                        Manifest.permission.BLUETOOTH_SCAN
+                    ),
+                    7
+                )
             }
         }
     }
@@ -85,6 +94,9 @@ class PrinterBridge(private val activity: Activity, private val web: WebView) {
             var result = "ok"
             try {
                 close()
+                if (!hasPermission()) {
+                    throw SecurityException("Izin Bluetooth Nearby Devices (Perangkat di sekitar) belum diberikan. Izinkan BLUETOOTH_CONNECT dan BLUETOOTH_SCAN, lalu coba lagi.")
+                }
                 val a = adapter() ?: throw IllegalStateException("Bluetooth tidak tersedia")
                 a.cancelDiscovery()
                 val dev: BluetoothDevice = a.getRemoteDevice(address)
