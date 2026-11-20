@@ -6,6 +6,7 @@ on:
     paths-ignore:
       - 'dzikr-app.zip'
       - '.github/workflows/dzikr-android.yml'
+      - '.github/workflows/main.yml'
       - 'DzikrBuild/**'
       - 'DzikrSource/**'
   workflow_dispatch:
