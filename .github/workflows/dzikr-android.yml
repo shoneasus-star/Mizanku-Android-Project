@@ -1,52 +1,142 @@
 name: Build Dzikr APK
-
 on:
   workflow_dispatch:
   push:
     paths:
-      - 'Dzikr-Android-Studio.zip'
+      - 'dzikr-app.zip'
       - '.github/workflows/dzikr-android.yml'
-
 permissions:
   contents: read
-
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
-
-      - name: Verify project archive
+      - uses: actions/checkout@v4
+        name: Checkout source
+      - name: Verify Dzikr source archive
         run: |
-          test -f Dzikr-Android-Studio.zip || {
-            echo "::error::Dzikr-Android-Studio.zip belum ada di root repository."
-            exit 1
+          test -f dzikr-app.zip
+          unzip -t dzikr-app.zip
+      - name: Prepare Android WebView project
+        run: |
+          mkdir -p DzikrBuild/app/src/main/assets/www DzikrBuild/app/src/main/java/id/dzikr/app
+          unzip -oq dzikr-app.zip -d DzikrSource
+          test -f DzikrSource/dzikr-app/index.html
+          cp -R DzikrSource/dzikr-app/. DzikrBuild/app/src/main/assets/www/
+          for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+            mkdir -p DzikrBuild/app/src/main/res/mipmap-$density
+            cp DzikrSource/dzikr-app/icons/icon-512.png DzikrBuild/app/src/main/res/mipmap-$density/ic_launcher.png
+            cp DzikrSource/dzikr-app/icons/icon-512.png DzikrBuild/app/src/main/res/mipmap-$density/ic_launcher_round.png
+          done
+          cat > DzikrBuild/settings.gradle <<'EOF'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement {
+            repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+            repositories { google(); mavenCentral() }
           }
-          unzip -t Dzikr-Android-Studio.zip
-
-      - name: Extract Android project
-        run: |
-          mkdir -p DzikrBuild
-          unzip -oq Dzikr-Android-Studio.zip -d DzikrBuild
-
+          rootProject.name = "Dzikr"
+          include(":app")
+          EOF
+          cat > DzikrBuild/build.gradle <<'EOF'
+          plugins { id 'com.android.application' version '8.7.3' apply false }
+          EOF
+          cat > DzikrBuild/gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          android.nonTransitiveRClass=true
+          EOF
+          cat > DzikrBuild/app/build.gradle <<'EOF'
+          plugins { id 'com.android.application' }
+          android {
+            namespace 'id.dzikr.app'
+            compileSdk 35
+            defaultConfig {
+              applicationId 'id.dzikr.app'
+              minSdk 23
+              targetSdk 35
+              versionCode 1
+              versionName '1.0'
+            }
+          }
+          EOF
+          cat > DzikrBuild/app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+            <uses-permission android:name="android.permission.INTERNET" />
+            <application android:allowBackup="true" android:label="Dzikr"
+              android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round"
+              android:supportsRtl="true" android:theme="@android:style/Theme.Material.Light.NoActionBar"
+              android:usesCleartextTraffic="false">
+              <activity android:name=".MainActivity" android:configChanges="keyboard|keyboardHidden|orientation|screenSize" android:exported="true">
+                <intent-filter>
+                  <action android:name="android.intent.action.MAIN" />
+                  <category android:name="android.intent.category.LAUNCHER" />
+                </intent-filter>
+              </activity>
+            </application>
+          </manifest>
+          EOF
+          cat > DzikrBuild/app/src/main/java/id/dzikr/app/MainActivity.java <<'EOF'
+          package id.dzikr.app;
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.webkit.WebChromeClient;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+          import android.graphics.Color;
+          import android.view.Window;
+          public class MainActivity extends Activity {
+            private WebView webView;
+            @Override public void onCreate(Bundle state) {
+              super.onCreate(state);
+              Window window = getWindow();
+              window.setStatusBarColor(Color.rgb(15,118,110));
+              window.setNavigationBarColor(Color.BLACK);
+              webView = new WebView(this);
+              webView.setBackgroundColor(Color.WHITE);
+              WebSettings s = webView.getSettings();
+              s.setJavaScriptEnabled(true);
+              s.setDomStorageEnabled(true);
+              s.setDatabaseEnabled(true);
+              s.setAllowFileAccess(true);
+              s.setAllowContentAccess(false);
+              s.setJavaScriptCanOpenWindowsAutomatically(false);
+              s.setSupportMultipleWindows(false);
+              s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+              webView.setWebViewClient(new WebViewClient());
+              webView.setWebChromeClient(new WebChromeClient());
+              setContentView(webView);
+              if (state == null) webView.loadUrl("file:///android_asset/www/index.html");
+              else webView.restoreState(state);
+            }
+            @Override protected void onSaveInstanceState(Bundle out) {
+              super.onSaveInstanceState(out);
+              if (webView != null) webView.saveState(out);
+            }
+            @Override public void onBackPressed() {
+              if (webView != null && webView.canGoBack()) webView.goBack();
+              else super.onBackPressed();
+            }
+            @Override protected void onDestroy() {
+              if (webView != null) { webView.destroy(); webView = null; }
+              super.onDestroy();
+            }
+          }
+          EOF
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-
       - name: Build debug APK
         run: gradle -p DzikrBuild assembleDebug
-
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
