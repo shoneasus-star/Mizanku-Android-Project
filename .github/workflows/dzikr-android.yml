@@ -23,6 +23,55 @@ jobs:
           unzip -oq dzikr-app.zip -d DzikrSource
           test -f DzikrSource/dzikr-app/index.html
           cp -R DzikrSource/dzikr-app/. DzikrBuild/app/src/main/assets/www/
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p = Path("DzikrBuild/app/src/main/assets/www/index.html")
+          html = p.read_text(encoding="utf-8")
+          shim = r"""<script>
+          (function () {
+            var announced = false;
+            function notify(message) {
+              try {
+                if (typeof window.toast === "function") window.toast(message);
+                else {
+                  var el = document.getElementById("dzikr-haptic-status");
+                  if (!el) {
+                    el = document.createElement("div");
+                    el.id = "dzikr-haptic-status";
+                    el.style.cssText = "position:fixed;z-index:2147483647;left:50%;bottom:24px;transform:translateX(-50%);background:#123c36;color:white;padding:12px 18px;border-radius:24px;font:600 14px sans-serif;box-shadow:0 4px 18px #0004;max-width:90%;text-align:center";
+                    (document.body || document.documentElement).appendChild(el);
+                  }
+                  el.textContent = message;
+                  el.style.display = "block";
+                  setTimeout(function(){ if(el) el.style.display="none"; }, 2400);
+                }
+              } catch (_) {}
+            }
+            function vibrate(pattern) {
+              try {
+                var b = window.DzikrHaptics;
+                if (!b) { notify("Getar belum tersedia pada perangkat ini"); return false; }
+                var ok = false;
+                if (typeof pattern === "number") ok = b.vibrate(Math.max(30, pattern));
+                else if (pattern && typeof pattern.length === "number") {
+                  var values = Array.prototype.slice.call(pattern, 0, 32).map(function(v){ return Math.max(0, Math.min(2000, Number(v)||0)); });
+                  if (values.length) ok = b.vibratePattern(values.join(","));
+                }
+                if (ok && !announced) { announced = true; notify("Getar aktif"); }
+                else if (!ok) notify("Getar gagal dijalankan");
+                return !!ok;
+              } catch (_) { notify("Getar gagal dijalankan"); return false; }
+            }
+            try { Object.defineProperty(navigator, "vibrate", { configurable:true, writable:true, value:vibrate }); }
+            catch (_) { try { navigator.vibrate = vibrate; } catch (e) {} }
+            try { Object.defineProperty(Navigator.prototype, "vibrate", { configurable:true, writable:true, value:vibrate }); } catch (_) {}
+          })();
+          </script>"""
+          if "DzikrHaptics" not in html:
+              html = re.sub(r"(<head[^>]*>)", lambda m: m.group(1) + shim, html, count=1, flags=re.I) if re.search(r"<head[^>]*>", html, flags=re.I) else shim + html
+              p.write_text(html, encoding="utf-8")
+          PY
           for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
             mkdir -p DzikrBuild/app/src/main/res/mipmap-$density
             cp DzikrSource/dzikr-app/icons/icon-512.png DzikrBuild/app/src/main/res/mipmap-$density/ic_launcher.png
@@ -94,7 +143,7 @@ jobs:
           public class MainActivity extends Activity {
             private Vibrator vibrator;
 
-            private class DzikrHaptics {
+            public class DzikrHaptics {
               @JavascriptInterface
               public boolean vibrate(long durationMs) {
                 try {
@@ -136,6 +185,7 @@ jobs:
               window.setNavigationBarColor(Color.BLACK);
               vibrator = (Vibrator) getSystemService(VIBRATOR_SERVICE);
               webView = new WebView(this);
+              webView.setHapticFeedbackEnabled(true);
               webView.addJavascriptInterface(new DzikrHaptics(), "DzikrHaptics");
               webView.setBackgroundColor(Color.WHITE);
               WebSettings s = webView.getSettings();
@@ -147,13 +197,7 @@ jobs:
               s.setJavaScriptCanOpenWindowsAutomatically(false);
               s.setSupportMultipleWindows(false);
               s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-              webView.setWebViewClient(new WebViewClient() {
-                @Override public void onPageFinished(WebView view, String url) {
-                  super.onPageFinished(view, url);
-                  String shim = "(function(){try{Object.defineProperty(navigator,'vibrate',{configurable:true,value:function(p){try{if(typeof p==='number'){return DzikrHaptics.vibrate(p);}if(p&&typeof p.length==='number'){return DzikrHaptics.vibratePattern(Array.from(p).join(','));}}catch(e){}return false;}});}catch(e){}})();";
-                  view.evaluateJavascript(shim, null);
-                }
-              });
+              webView.setWebViewClient(new WebViewClient());
               webView.setWebChromeClient(new WebChromeClient());
               setContentView(webView);
               if (state == null) webView.loadUrl("file:///android_asset/www/index.html");
