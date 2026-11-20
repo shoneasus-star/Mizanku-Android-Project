@@ -85,16 +85,58 @@ jobs:
           import android.webkit.WebSettings;
           import android.webkit.WebView;
           import android.webkit.WebViewClient;
+          import android.webkit.JavascriptInterface;
+          import android.os.Build;
+          import android.os.VibrationEffect;
+          import android.os.Vibrator;
           import android.graphics.Color;
           import android.view.Window;
           public class MainActivity extends Activity {
+            private Vibrator vibrator;
+
+            private class DzikrHaptics {
+              @JavascriptInterface
+              public boolean vibrate(long durationMs) {
+                try {
+                  if (vibrator == null || !vibrator.hasVibrator()) return false;
+                  long duration = Math.max(1L, Math.min(durationMs, 2000L));
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    vibrator.vibrate(VibrationEffect.createOneShot(duration, VibrationEffect.DEFAULT_AMPLITUDE));
+                  } else {
+                    vibrator.vibrate(duration);
+                  }
+                  return true;
+                } catch (Exception e) { return false; }
+              }
+
+              @JavascriptInterface
+              public boolean vibratePattern(String csv) {
+                try {
+                  if (vibrator == null || !vibrator.hasVibrator() || csv == null) return false;
+                  String[] parts = csv.split(",");
+                  int count = Math.min(parts.length, 32);
+                  long[] timings = new long[count];
+                  for (int i = 0; i < count; i++) {
+                    timings[i] = Math.max(0L, Math.min(Long.parseLong(parts[i].trim()), 2000L));
+                  }
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    vibrator.vibrate(VibrationEffect.createWaveform(timings, -1));
+                  } else {
+                    vibrator.vibrate(timings, -1);
+                  }
+                  return true;
+                } catch (Exception e) { return false; }
+              }
+            }
             private WebView webView;
             @Override public void onCreate(Bundle state) {
               super.onCreate(state);
               Window window = getWindow();
               window.setStatusBarColor(Color.rgb(15,118,110));
               window.setNavigationBarColor(Color.BLACK);
+              vibrator = (Vibrator) getSystemService(VIBRATOR_SERVICE);
               webView = new WebView(this);
+              webView.addJavascriptInterface(new DzikrHaptics(), "DzikrHaptics");
               webView.setBackgroundColor(Color.WHITE);
               WebSettings s = webView.getSettings();
               s.setJavaScriptEnabled(true);
@@ -105,7 +147,13 @@ jobs:
               s.setJavaScriptCanOpenWindowsAutomatically(false);
               s.setSupportMultipleWindows(false);
               s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-              webView.setWebViewClient(new WebViewClient());
+              webView.setWebViewClient(new WebViewClient() {
+                @Override public void onPageFinished(WebView view, String url) {
+                  super.onPageFinished(view, url);
+                  String shim = "(function(){try{Object.defineProperty(navigator,'vibrate',{configurable:true,value:function(p){try{if(typeof p==='number'){return DzikrHaptics.vibrate(p);}if(p&&typeof p.length==='number'){return DzikrHaptics.vibratePattern(Array.from(p).join(','));}}catch(e){}return false;}});}catch(e){}})();";
+                  view.evaluateJavascript(shim, null);
+                }
+              });
               webView.setWebChromeClient(new WebChromeClient());
               setContentView(webView);
               if (state == null) webView.loadUrl("file:///android_asset/www/index.html");
