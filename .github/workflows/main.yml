@@ -3,6 +3,11 @@ name: Build Mizanku APK
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'dzikr-app.zip'
+      - '.github/workflows/dzikr-android.yml'
+      - 'DzikrBuild/**'
+      - 'DzikrSource/**'
   workflow_dispatch:
 
 permissions:
